@@ -1,16 +1,29 @@
 # SpecGuard
 
-AI-powered system to detect documentation drift and validate claims using code and LLM reasoning.
+SpecGuard detects documentation drift by comparing claims in markdown docs against values and defaults inferred from Python code and configuration. It is aimed at engineering teams that want docs to remain operationally accurate as code changes, with optional OpenAI-based validation to help reduce false positives when a mismatch needs more context than a direct value comparison can provide.
+
+## Why SpecGuard
+
+Documentation drift usually starts small: a retry count changes, a timeout default moves, or a feature flag no longer matches the implementation. Those inconsistencies are easy to miss in review and expensive to discover later. SpecGuard helps surface them early by checking what the docs claim against what the code actually defines.
 
 ## Features
 
-- Regex + AI claim extraction from markdown documentation
-- Natural-language and markdown-table claim detection
-- Python code parsing for constants, typed assignments, config dictionaries, dataclasses, and `os.getenv` defaults
-- File and line-aware reporting for both docs and code
-- AI validation to judge whether mismatches reflect real drift
-- GitHub pull request comments through GitHub Actions
-- Stable PR comment updates instead of posting a new comment every run
+- Extracts claims from markdown using regex-based parsing
+- Detects claims in simple natural-language sentences and markdown tables
+- Parses Python configuration patterns including module-level constants, typed assignments, config dictionaries, dataclass-style config classes, and `os.getenv(..., default)` fallbacks
+- Produces file and line-aware reports for both docs and code
+- Optionally uses OpenAI to validate mismatches with a confidence score and explanation
+- Supports CLI usage for local checks and CI integration
+- Can format results as GitHub-friendly pull request comments
+
+## How It Works
+
+1. Read a markdown document and extract structured claims such as `Retries: 3` or `The retry count defaults to 4`.
+2. Parse Python files to collect comparable configuration values and defaults.
+3. Match documentation claims to code-derived values.
+4. Flag mismatches and missing code matches.
+5. Optionally send mismatches to OpenAI for a second-pass validation.
+6. Render results for the terminal or a GitHub-compatible markdown comment.
 
 ## Project Layout
 
@@ -34,16 +47,7 @@ specguard/
   tests/
 ```
 
-## How It Works
-
-1. SpecGuard extracts claims like `Retries: 3`, markdown table values, and simple natural-language statements from documentation.
-2. It optionally falls back to OpenAI-powered extraction if regex-based extraction finds nothing useful.
-3. It parses Python files and collects configuration-like values such as uppercase constants, typed defaults, dataclass fields, dictionary-backed settings, and `os.getenv(..., default)` fallbacks.
-4. It compares documentation claims to code constants with light alias matching for keys such as `retry_count` and `retries`.
-5. For each mismatch, it asks OpenAI whether the documentation claim matches the code behavior and includes a confidence score.
-6. It formats the results for both local CLI output and GitHub pull request comments, including doc and code locations.
-
-## Usage
+## Quick Start
 
 Install dependencies:
 
@@ -51,33 +55,40 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Run the CLI:
+Run against the included example:
 
 ```bash
 python cli.py --doc examples/sample.md --code examples/
 ```
 
-Optionally enable fallback LLM extraction:
-
-```bash
-python cli.py --doc examples/sample.md --code examples/ --use-llm-extraction
-```
-
-Write a GitHub-ready markdown report to disk:
+Write a GitHub-ready markdown report:
 
 ```bash
 python cli.py --doc examples/sample.md --code examples/ --github-output specguard_report.md
 ```
 
+Enable LLM fallback extraction when needed:
+
+```bash
+python cli.py --doc examples/sample.md --code examples/ --use-llm-extraction
+```
+
 ## OpenAI Configuration
 
-Set your API key before using AI validation:
+OpenAI is optional.
+
+If `OPENAI_API_KEY` is set, SpecGuard can:
+
+- Fall back to LLM-based claim extraction when rule-based extraction is insufficient
+- Validate mismatches with a confidence score and short explanation
+
+Configure it with:
 
 ```bash
 export OPENAI_API_KEY="your_api_key_here"
 ```
 
-If the API key is missing, SpecGuard fails gracefully and marks AI validation as uncertain instead of crashing.
+If the API key is not set, SpecGuard still runs and marks AI validation as unavailable instead of failing.
 
 ## Example
 
@@ -95,29 +106,44 @@ RETRIES = 2
 TIMEOUT = 5
 ```
 
-This produces a drift report because `Retries` differs between documentation and code.
+In this example, `timeout` matches, while `retries` is flagged because the documented value differs from the code value.
 
-## GitHub Action
+## Sample Output
 
-The included workflow runs on `pull_request`, executes SpecGuard, saves the markdown report, and updates a single persistent pull request comment with `actions/github-script`.
+```text
+SpecGuard detected documentation drift:
 
-Workflow behavior:
+- retries mismatch:
+  Doc: 3 (sample.md:1)
+  Code: 2 (sample.py:1)
+  AI Verdict: Uncertain (Confidence: 0%)
+  Reason: OPENAI_API_KEY is not set; skipping AI validation.
+```
 
-- Runs `python cli.py --doc README.md --code . --github-output specguard_report.md`
-- Captures non-zero exit status without stopping the workflow immediately
-- Finds the existing SpecGuard comment marker and updates it, or creates a new comment if one does not exist
-- Fails the workflow after commenting when drift is detected
+## Good Fit For
 
-This keeps pull requests tidy while still surfacing every new report.
+- Teams that treat documentation as part of the release surface
+- Python services and tools with configuration-heavy behavior
+- Repositories that want a lightweight doc-versus-code check in CI
+- Pull request workflows where stale docs should be caught during review
+
+## Limitations
+
+- Python support is focused on common configuration patterns, not full runtime behavior
+- Documentation extraction is heuristic-based and works best on explicit, structured claims
+- AI validation is assistive, not authoritative
+- Non-Python languages are not currently parsed
+
+## Roadmap
+
+- Broader parsing support for additional Python patterns and frameworks
+- Better extraction for more free-form technical prose
+- Smarter key aliasing and comparison logic
+- Expanded machine-readable outputs for downstream tooling
+- More robust pull request comment workflows
 
 ## Running Tests
 
 ```bash
 python -m unittest discover -s tests
 ```
-
-## Notes
-
-- The parser is strongest on Python configuration patterns and literal defaults.
-- Natural-language extraction is heuristic-based, so OpenAI fallback remains useful for richer prose.
-- AI validation is designed as an intelligent helper, not a replacement for deterministic comparison.
